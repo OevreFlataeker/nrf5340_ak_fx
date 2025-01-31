@@ -68,6 +68,44 @@ static int16_t sine750_48k_16b_1c[64] =
 	-20788, -18205, -15447, -12540,  -9512,  -6393,  -3212,     -1,
 };
 
+static int16_t zerowave[64] = 
+{
+	0,0,0,0,0,0,0,0,
+		0,0,0,0,0,0,0,0,
+			0,0,0,0,0,0,0,0,
+				0,0,0,0,0,0,0,0,
+					0,0,0,0,0,0,0,0,
+						0,0,0,0,0,0,0,0,
+							0,0,0,0,0,0,0,0,
+								0,0,0,0,0,0,0,0,
+};
+
+#define I2S_BUFF_SIZE 256  // Define an appropriate buffer size
+
+static int16_t rx_buffer[I2S_BUFF_SIZE];  // Buffer for received data
+static int16_t tx_buffer[I2S_BUFF_SIZE]; 
+
+void i2s_callback(void)
+{
+    // Process received data (example: simple passthrough)
+    for (int i = 0; i < I2S_BUFF_SIZE; i++) {
+        tx_buffer[i] = rx_buffer[i];  // Modify as needed
+    }
+
+    // Restart TX with modified data
+    NRF_I2S0->TXD.PTR = (uint32_t)tx_buffer;
+    NRF_I2S0->RXTXD.MAXCNT = I2S_BUFF_SIZE / sizeof(uint32_t);
+
+    // Restart I2S transmission and reception
+    NRF_I2S0->TASKS_START = I2S_TASKS_START_TASKS_START_Trigger;
+}
+
+void process_audio(int16_t *rx, int16_t *tx, size_t size)
+{
+    for (size_t i = 0; i < size; i++) {
+        tx[i] = rx[i];  // Simple passthrough (modify as needed)
+    }
+}
 
 /**
  * @brief       Initialize and start the I2S peripheral using NRF registers.
@@ -82,21 +120,70 @@ static int nrfadk_i2s_reg_init(void)
 	NRF_I2S0->CONFIG.RATIO =        I2S_CONFIG_RATIO_RATIO_128X;
 	NRF_I2S0->CONFIG.CHANNELS =     I2S_CONFIG_CHANNELS_CHANNELS_Left;
 	NRF_I2S0->CONFIG.TXEN =         I2S_CONFIG_TXEN_TXEN_Enabled;
+	NRF_I2S0->CONFIG.RXEN = 		I2S_CONFIG_RXEN_RXEN_Enabled;  // Enable RX (new)
 
 	NRF_I2S0->ENABLE =              I2S_ENABLE_ENABLE_Enabled;
 
 
 	// Start TX buffer
+	NRF_I2S0->RXD.PTR = 			(uint32_t)rx_buffer;
+	NRF_I2S0->TXD.PTR = 			(uint32_t)tx_buffer;
+    //NRF_I2S0->RXTXD.MAXCNT = 		I2S_BUFF_SIZE / sizeof(uint32_t);
+	//NRF_I2S0->TXD.PTR =             (uint32_t)&zerowave[0];//(uint32_t)&sine750_48k_16b_1c[0];
 	NRF_I2S0->TXD.PTR =             (uint32_t)&sine750_48k_16b_1c[0];
+	
+	//NRF_I2S0->RXTXD.MAXCNT =        (sizeof(zerowave)) / (sizeof(uint32_t));//(sizeof(sine750_48k_16b_1c)) / (sizeof(uint32_t));
 	NRF_I2S0->RXTXD.MAXCNT =        (sizeof(sine750_48k_16b_1c)) / (sizeof(uint32_t));
 
+	
+	 // Clear pending events
+    NRF_I2S0->EVENTS_RXPTRUPD = 0;
+    NRF_I2S0->EVENTS_TXPTRUPD = 0;
+
+	// Enable interrupt for I2S event
+    //NRF_I2S0->INTENSET = I2S_INTENSET_RXPTRUPD_Msk;  // Trigger on RX update
+	
+	
 	NRF_I2S0->TASKS_START =         I2S_TASKS_START_TASKS_START_Trigger;
+	NVIC_ClearPendingIRQ(I2S0_IRQn);
 
-
+	NVIC_SetPriority(I2S0_IRQn, 3);
+    //NVIC_EnableIRQ(I2S0_IRQn);
 	return 0;
 }
 
+void i2s_polling_loop(void)
+{
+    while (1)
+    {
+        // Wait for new RX data
+        while (NRF_I2S0->EVENTS_RXPTRUPD == 0);
+		uint32_t cnt = NRF_I2S0->EVENTS_RXPTRUPD;
+		printk("\n%d", cnt);
+        // Clear RX event
+        NRF_I2S0->EVENTS_RXPTRUPD = 0;
 
+        // Process audio data
+        process_audio(rx_buffer, tx_buffer, I2S_BUFF_SIZE);
+
+        // Set TX buffer and restart TX
+        NRF_I2S0->TXD.PTR = (uint32_t)tx_buffer;
+
+        // Ensure we restart I2S for continuous operation
+        NRF_I2S0->TASKS_START = I2S_TASKS_START_TASKS_START_Trigger;
+    }
+}
+
+// ISR for I2S
+void I2S0_IRQHandler(void)
+{
+    if (NRF_I2S0->EVENTS_RXPTRUPD)
+    {
+		printk("\nin ISR");
+        NRF_I2S0->EVENTS_RXPTRUPD = 0;  // Clear event flag
+        i2s_callback();
+    }
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 // HW_CODEC
@@ -109,7 +196,7 @@ static cs47l63_t cs47l63_driver;
 static const uint32_t cs47l63_cfg[][2] =
 {
 
-	// Audio Serial Port 1 (I2S slave, 48kHz 16bit, Left mono, RX only)
+	// Audio Serial Port 1 (I2S slave, 48kHz 16bit, Left mono, RX and TX)
 
 	{ CS47L63_ASP1_CONTROL2,
 		(0x10  << CS47L63_ASP1_RX_WIDTH_SHIFT) |        // 16bit
@@ -123,9 +210,23 @@ static const uint32_t cs47l63_cfg[][2] =
 		(0 << CS47L63_ASP1_RX2_EN_SHIFT) |              // Disabled
 		(1 << CS47L63_ASP1_RX1_EN_SHIFT) |              // Enabled
 		(0 << CS47L63_ASP1_TX2_EN_SHIFT) |              // Disabled
-		(0 << CS47L63_ASP1_TX1_EN_SHIFT)                // Disabled
+		//(0 << CS47L63_ASP1_TX1_EN_SHIFT)                // Disabled
+		(1 << CS47L63_ASP1_TX1_EN_SHIFT)                // Enabled
 	},
 
+	// Enable line-in
+	{ CS47L63_INPUT2_CONTROL1, 0x00050020 },/* MODE=analog */ 
+	{ CS47L63_IN2L_CONTROL1, 0x10000000 },  /* SRC=IN2LP */
+	{ CS47L63_IN2R_CONTROL1, 0x10000000 },  /* SRC=IN2RP */
+	{ CS47L63_INPUT_CONTROL, 0x0000000C },  /* IN2_EN=1 */
+	// Set volume for line-in
+	{ CS47L63_IN2L_CONTROL2, 0x00800080 },  /* VOL=0dB, MUTE=0 */
+	{ CS47L63_IN2R_CONTROL2, 0x00800080 },  /* VOL=0dB, MUTE=0 */
+	{ CS47L63_INPUT_CONTROL3, 0x20000000 }, /* VU=1 */
+	// Important
+	/* Route IN2L and IN2R to I2S */
+	{ CS47L63_ASP1TX1_INPUT1, 0x800012 },
+	{ CS47L63_ASP1TX2_INPUT1, 0x800013 },
 
 	// Noise Generator (increased GAIN from -114dB to 0dB)
 
@@ -139,20 +240,33 @@ static const uint32_t cs47l63_cfg[][2] =
 
 	{ CS47L63_OUT1L_INPUT1,
 		(0x2E  << CS47L63_OUT1LMIX_VOL1_SHIFT) |        // -18dB
-		(0x020 << CS47L63_OUT1L_SRC1_SHIFT)             // ASP1_RX1
+		(0x020 << CS47L63_OUT1L_SRC1_SHIFT)             // ASP1_RX1 // from MCU (currently a sine wave only)
 	},
 	{ CS47L63_OUT1L_INPUT2,
 		(0x40  << CS47L63_OUT1LMIX_VOL2_SHIFT) |        // 0dB
 		(0x000 << CS47L63_OUT1L_SRC2_SHIFT)             // NO_INPUT
 	},
-	{ CS47L63_OUT1L_INPUT3,
-		(0x2B  << CS47L63_OUT1LMIX_VOL3_SHIFT) |        // -21dB
-		(0x004 << CS47L63_OUT1L_SRC3_SHIFT)             // TONE1_GEN
+	//{ CS47L63_OUT1L_INPUT3,
+	//	(0x2B  << CS47L63_OUT1LMIX_VOL3_SHIFT) |        // -21dB
+	//	(0x004 << CS47L63_OUT1L_SRC3_SHIFT)             // TONE1_GEN
+	//},
+	
+	{
+		CS47L63_OUT1L_INPUT3,
+		(0x2B  << CS47L63_OUT1LMIX_VOL3_SHIFT) |
+		(0x012 << CS47L63_OUT1L_SRC3_SHIFT)    // 0x12=IN2L
 	},
-	{ CS47L63_OUT1L_INPUT4,
-		(0x28  << CS47L63_OUT1LMIX_VOL4_SHIFT) |        // -24dB
-		(0x00C << CS47L63_OUT1L_SRC4_SHIFT)             // NOISE_GEN
+	{
+		CS47L63_OUT1L_INPUT4,
+		(0x2B  << CS47L63_OUT1LMIX_VOL4_SHIFT) |
+		(0x013 << CS47L63_OUT1L_SRC4_SHIFT)    // 0x13=IN2R
 	},
+	
+
+	//{ CS47L63_OUT1L_INPUT4,
+	//	(0x28  << CS47L63_OUT1LMIX_VOL4_SHIFT) |        // -24dB
+	//	(0x00C << CS47L63_OUT1L_SRC4_SHIFT)             // NOISE_GEN
+	//},
 	{ CS47L63_OUTPUT_ENABLE_1,
 		(1 << CS47L63_OUT1L_EN_SHIFT)                   // Enabled
 	},
@@ -257,39 +371,41 @@ int main(void)
 	                   CS47L63_OUT_VU_MASK | CS47L63_OUT1L_MUTE_MASK,
 	                   CS47L63_OUT_VU | 0);
 
-	printk("\nOUT1L unmuted\n");
-	k_msleep(3000);
+	printk("\nOUT1L unmuted for 5000ms\n");
+
+	k_msleep(5000);
+	// i2s_polling_loop();
 
 
-	cs47l63_update_reg(&cs47l63_driver, CS47L63_COMFORT_NOISE_GENERATOR,
-	                   CS47L63_NOISE_GEN_EN_MASK, CS47L63_NOISE_GEN_EN);
+	//cs47l63_update_reg(&cs47l63_driver, CS47L63_COMFORT_NOISE_GENERATOR,
+	//                   CS47L63_NOISE_GEN_EN_MASK, CS47L63_NOISE_GEN_EN);
 
-	printk("NOISE enabled\n");
-	k_msleep(3000);
+	//printk("NOISE enabled\n");
+	//k_msleep(3000);
 
 
-	cs47l63_update_reg(&cs47l63_driver, CS47L63_TONE_GENERATOR1,
-	                   CS47L63_TONE1_EN_MASK, CS47L63_TONE1_EN);
+	//cs47l63_update_reg(&cs47l63_driver, CS47L63_TONE_GENERATOR1,
+	//                   CS47L63_TONE1_EN_MASK, CS47L63_TONE1_EN);
 
-	printk("TONE1 enabled\n");
-	k_msleep(3000);
+	//printk("TONE1 enabled\n");
+	//k_msleep(3000);
 
 
 
 	// Disable NOISE/TONE1 generators and mute OUT1L I2S playback
 
-	cs47l63_update_reg(&cs47l63_driver, CS47L63_COMFORT_NOISE_GENERATOR,
-	                   CS47L63_NOISE_GEN_EN_MASK, 0);
+	//cs47l63_update_reg(&cs47l63_driver, CS47L63_COMFORT_NOISE_GENERATOR,
+	//                   CS47L63_NOISE_GEN_EN_MASK, 0);
 
-	printk("\nNOISE disabled\n");
-	k_msleep(3000);
+	//printk("\nNOISE disabled\n");
+	//k_msleep(3000);
 
 
-	cs47l63_update_reg(&cs47l63_driver, CS47L63_TONE_GENERATOR1,
-	                   CS47L63_TONE1_EN_MASK, 0);
+	//cs47l63_update_reg(&cs47l63_driver, CS47L63_TONE_GENERATOR1,
+	//                   CS47L63_TONE1_EN_MASK, 0);
 
-	printk("TONE1 disabled\n");
-	k_msleep(3000);
+	//printk("TONE1 disabled\n");
+	//k_msleep(3000);
 
 
 	cs47l63_update_reg(&cs47l63_driver, CS47L63_OUT1L_VOLUME_1,
