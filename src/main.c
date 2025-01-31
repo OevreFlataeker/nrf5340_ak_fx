@@ -255,6 +255,7 @@ static const uint32_t cs47l63_cfg[][2] =
 	//},
 	
 	// We need both channels here, even if we only have one output channel
+	// Iw we uncomment the next two {} we won´t get any line in pass-through, only i2s
 	{
 		CS47L63_OUT1L_INPUT3,
 		(0x2B  << CS47L63_OUT1LMIX_VOL3_SHIFT) |
