@@ -206,6 +206,7 @@ static const uint32_t cs47l63_cfg[][2] =
 	{ CS47L63_ASP1_CONTROL3,
 		(0b00 << CS47L63_ASP1_DOUT_HIZ_CTRL_SHIFT)      // Always 0
 	},
+	// Enable the various channels for RX and TX
 	{ CS47L63_ASP1_ENABLES1,
 		(0 << CS47L63_ASP1_RX2_EN_SHIFT) |              // Disabled
 		(1 << CS47L63_ASP1_RX1_EN_SHIFT) |              // Enabled
@@ -229,19 +230,21 @@ static const uint32_t cs47l63_cfg[][2] =
 	{ CS47L63_ASP1TX2_INPUT1, 0x800013 },
 
 	// Noise Generator (increased GAIN from -114dB to 0dB)
-
+	/*
 	{ CS47L63_COMFORT_NOISE_GENERATOR,
 		(0    << CS47L63_NOISE_GEN_EN_SHIFT) |          // Disabled
 		(0x13 << CS47L63_NOISE_GEN_GAIN_SHIFT)          // 0dB
 	},
-
+	*/
 
 	// Output 1 Left (reduced MIX_VOLs to prevent clipping summed signals)
 
+	// this here is only there so we hear also that i2s data is sent 
 	{ CS47L63_OUT1L_INPUT1,
-		(0x2E  << CS47L63_OUT1LMIX_VOL1_SHIFT) |        // -18dB
+		(0x18  << CS47L63_OUT1LMIX_VOL1_SHIFT) |        // quite weak
 		(0x020 << CS47L63_OUT1L_SRC1_SHIFT)             // ASP1_RX1 // from MCU (currently a sine wave only)
 	},
+
 	{ CS47L63_OUT1L_INPUT2,
 		(0x40  << CS47L63_OUT1LMIX_VOL2_SHIFT) |        // 0dB
 		(0x000 << CS47L63_OUT1L_SRC2_SHIFT)             // NO_INPUT
@@ -251,6 +254,7 @@ static const uint32_t cs47l63_cfg[][2] =
 	//	(0x004 << CS47L63_OUT1L_SRC3_SHIFT)             // TONE1_GEN
 	//},
 	
+	// We need both channels here, even if we only have one output channel
 	{
 		CS47L63_OUT1L_INPUT3,
 		(0x2B  << CS47L63_OUT1LMIX_VOL3_SHIFT) |
