@@ -268,25 +268,45 @@ static const uint32_t cs47l63_cfg[][2] =
 		(1 << CS47L63_ASP1_TX1_EN_SHIFT)                // Enabled
 	},
 #endif
+#define ENABLE_MIC
 #ifdef ENABLE_MIC
 	// Enable digital MIC
 	/* Set MICBIASes */
-	{ CS47L63_LDO2_CTRL1, 0x0005 },
-	{ CS47L63_MICBIAS_CTRL1, 0x00EC },
-	{ CS47L63_MICBIAS_CTRL5, 0x0272 },
+	{ CS47L63_LDO2_CTRL1, 0x0005 },     // p165, 0b00000101 -> Bit 0, LDO2_EN=1, Bit 2, LDO2_DISCH=1, Voltage = 0x0 (default) 2.4V
+	{ CS47L63_MICBIAS_CTRL1, 0x00EC },  // p166, 0b11101100 -> Bit 2, MICB1_DISCH=1, discharge when disable, (default = 1)
+	                                    //                     Bit 3, MICB1_RATE=1, 1 = Pop-free start-up/shutdown (default = 0)
+										//                     Bit 5-7 = 0x7 = 2.2V (default)
+	{ CS47L63_MICBIAS_CTRL5, 0x0272 },  // p166, 0b0010 0111 0010 -> Bit 1 MICB1A_DISCH=1, discharge when disable (default)
+	                                    //                        -> Bit 4 MICB1B_EN=1
+										//                        -> Bit 5 MICB1B_DISCH=1, discharge when disable (default)
+										//                        -> Bit 6 MICB1B_SRC=1 = VDD_A (default 0, MICBIAS regulator)
+										//                        -> Bit 9 MICB1C_DISCH=1, discharge when disable (default)  
 
 	/* Enable IN1L */
-	{ CS47L63_INPUT_CONTROL, 0x000F },
+	{ CS47L63_INPUT_CONTROL, 0x000F },  // p29, 0b00001111 -> Bit 0, IN1R_EN, 
+										//                    Bit 1, IN1L_EN, 
+										//                    Bit 2, IN2R_EN, 
+										//                    Bit 3, IN2L_EN
 
 	/* Enable PDM mic as digital input */
-	{ CS47L63_INPUT1_CONTROL1, 0x50021 },
+	{ CS47L63_INPUT1_CONTROL1, 0x50021 }, // p31, 0b0101 00000000 0010 0001 -> Bit 0, Input Path 1 Mode=Digital input
+	                                      //                                -> Bit 5, fixed at according to p181? (see also p30 "Note")
+										  //                                -> Bit 16-18 Input Path 1 Oversample control, p27
+										  //                                   = 0b101 = 3.072 MHz, controls IN1_PDMCLK freq
 
 	/* Un-mute and set gain to 0dB */
-	{ CS47L63_IN1L_CONTROL2, 0x800080 },
-	{ CS47L63_IN1R_CONTROL2, 0x800080 },
+	{ CS47L63_IN1L_CONTROL2, 0x800080 },  // p31 & p34, p181 0b1000 0000 0000 0000 1000 0000
+	  									  // Bit 1-7 = 0x40 = 0dB Input Path 1L PGA Volume (analog only)
+	                                      // Bit 16-23 = 0x80 = default 0dB Input Path 1L Digial volume
+										  // Bit 28 = 0 (default 1), unmute
+
+	{ CS47L63_IN1R_CONTROL2, 0x800080 },  // p31 & p34, p181 0b1000 0000 0000 0000 1000 0000
+										  // Bit 1-7 = 0x40 = 0dB Input Path 1R PGA Volume (analog only)
+	                                      // Bit 16-23 = 0x80 = default 0dB Input Path 1R Digial volume
+										  // Bit 28 = 0 (default 1), unmute
 
 	/* Volume Update */
-	{ CS47L63_INPUT_CONTROL3, 0x20000000 },
+	{ CS47L63_INPUT_CONTROL3, 0x20000000 }, // p181, set IN_VU to 1
 
 	/* Send PDM MIC to I2S Tx */
 	//{ CS47L63_ASP1TX1_INPUT1, 0x800010 },
