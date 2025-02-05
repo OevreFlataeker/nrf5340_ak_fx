@@ -104,17 +104,20 @@ void i2s_callback(void)
     NRF_I2S0->TASKS_START = I2S_TASKS_START_TASKS_START_Trigger;
 }
 
+#define DELAY 2048
 void process_audio(int16_t *rx, int16_t *tx, size_t size)
 {
-	
+	static int16_t delay_buffer[DELAY];
+	static int delay_index = 0;
+
 	for (int i=0; i<size; ++i) {
-		tx[i] = rx[i];
+		int16_t delayed_sample = delay_buffer[delay_index];
+		tx[i] = rx[i] + delayed_sample * 0.5;
+		//printk("%d %d\n", tx[i], rx[i]);
+		delay_buffer[delay_index] = rx[i];
+		delay_index = (delay_index + 1) % DELAY;
 	}
-    /*for (int i = 2048; i < size; ++i) {
-			tx[i] += rx[i-2048] / 2;
-			
-		}
-	*/
+    
 	/*
 	
 	for (size_t i = 0; i < size; i++) {
