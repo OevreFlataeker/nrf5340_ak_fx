@@ -106,13 +106,25 @@ void i2s_callback(void)
 
 void process_audio(int16_t *rx, int16_t *tx, size_t size)
 {
-    for (size_t i = 0; i < size; i++) {
+	
+	for (int i=0; i<size; ++i) {
+		tx[i] = rx[i];
+	}
+    /*for (int i = 2048; i < size; ++i) {
+			tx[i] += rx[i-2048] / 2;
+			
+		}
+	*/
+	/*
+	
+	for (size_t i = 0; i < size; i++) {
 		tx[i] = rx[i];  // Simple passthrough (modify as needed)
         //tx[i] = (int16_t)(rx[i]*0.1);  // Volume control
 		//tx[size-1-i] = rx[i];  // Reverse - doesn't work... -> only outputs silence...?
 
 		//printk("0x%02x ", rx[i]);
     }
+	*/
 }
 
 /**
