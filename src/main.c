@@ -16,8 +16,10 @@
 // NRFX_CLOCKS
 
 #define HFCLKAUDIO_12_288_MHZ 0x9BA6
-#define ENABLE_LINEIN
-#undef ENABLE_MIC
+#undef ENABLE_LINEIN
+#undef ENABLE_LINEIN_PASSTHROUGH
+#define ENABLE_MIC
+#undef ENABLE_MIC_PASSTHROUGH
 
 
 /**
@@ -268,7 +270,7 @@ static const uint32_t cs47l63_cfg[][2] =
 		(1 << CS47L63_ASP1_TX1_EN_SHIFT)                // Enabled
 	},
 #endif
-#define ENABLE_MIC
+
 #ifdef ENABLE_MIC
 	// Enable digital MIC
 	/* Set MICBIASes */
@@ -276,18 +278,22 @@ static const uint32_t cs47l63_cfg[][2] =
 	{ CS47L63_MICBIAS_CTRL1, 0x00EC },  // p166, 0b11101100 -> Bit 2, MICB1_DISCH=1, discharge when disable, (default = 1)
 	                                    //                     Bit 3, MICB1_RATE=1, 1 = Pop-free start-up/shutdown (default = 0)
 										//                     Bit 5-7 = 0x7 = 2.2V (default)
-	{ CS47L63_MICBIAS_CTRL5, 0x0272 },  // p166, 0b0010 0111 0010 -> Bit 1 MICB1A_DISCH=1, discharge when disable (default)
-	                                    //                        -> Bit 4 MICB1B_EN=1
-										//                        -> Bit 5 MICB1B_DISCH=1, discharge when disable (default)
-										//                        -> Bit 6 MICB1B_SRC=1 = VDD_A (default 0, MICBIAS regulator)
-										//                        -> Bit 9 MICB1C_DISCH=1, discharge when disable (default)  
-
+	// We only need MICB1B related settings.
+	//{ CS47L63_MICBIAS_CTRL5, 0x0272 },  // p166, 0b0010 0111 0010 -> Bit 1 MICB1A_DISCH=1, discharge when disable (default)
+   	                                      //                        -> Bit 4 MICB1B_EN=1
+										  //                        -> Bit 5 MICB1B_DISCH=1, discharge when disable (default)
+										  //                        -> Bit 6 MICB1B_SRC=1 = VDD_A (default 0, MICBIAS regulator)
+										  //                        -> Bit 9 MICB1C_DISCH=1, discharge when disable (default)  
+	
+	{ CS47L63_MICBIAS_CTRL5, 0x0070 },    // Only set Bit 4,5,6 fo MICB1B = PDM Mic
 	/* Enable IN1L */
-	{ CS47L63_INPUT_CONTROL, 0x000F },  // p29, 0b00001111 -> Bit 0, IN1R_EN, 
-										//                    Bit 1, IN1L_EN, 
-										//                    Bit 2, IN2R_EN, 
-										//                    Bit 3, IN2L_EN
-
+	//{ CS47L63_INPUT_CONTROL, 0x000F },  // p29, 0b00001111 -> Bit 0, IN1R_EN, 
+										  //                    Bit 1, IN1L_EN, 
+										  //                    Bit 2, IN2R_EN, 
+										  //                    Bit 3, IN2L_EN
+    
+	{ CS47L63_INPUT_CONTROL, 0x0002 },    // The PDM only needs IN1L_EN -> Bit 1 set
+	
 	/* Enable PDM mic as digital input */
 	{ CS47L63_INPUT1_CONTROL1, 0x50021 }, // p31, 0b0101 00000000 0010 0001 -> Bit 0, Input Path 1 Mode=Digital input
 	                                      //                                -> Bit 5, fixed at according to p181? (see also p30 "Note")
@@ -300,7 +306,8 @@ static const uint32_t cs47l63_cfg[][2] =
 	                                      // Bit 16-23 = 0x80 = default 0dB Input Path 1L Digial volume
 										  // Bit 28 = 0 (default 1), unmute
 
-	{ CS47L63_IN1R_CONTROL2, 0x800080 },  // p31 & p34, p181 0b1000 0000 0000 0000 1000 0000
+	// We don´t actually need the settings for IN1R for PDM MIC
+	//{ CS47L63_IN1R_CONTROL2, 0x800080 },  // p31 & p34, p181 0b1000 0000 0000 0000 1000 0000
 										  // Bit 1-7 = 0x40 = 0dB Input Path 1R PGA Volume (analog only)
 	                                      // Bit 16-23 = 0x80 = default 0dB Input Path 1R Digial volume
 										  // Bit 28 = 0 (default 1), unmute
@@ -309,8 +316,9 @@ static const uint32_t cs47l63_cfg[][2] =
 	{ CS47L63_INPUT_CONTROL3, 0x20000000 }, // p181, set IN_VU to 1
 
 	/* Send PDM MIC to I2S Tx */
-	//{ CS47L63_ASP1TX1_INPUT1, 0x800010 },
-	//{ CS47L63_ASP1TX2_INPUT1, 0x800011 },
+	{ CS47L63_ASP1TX1_INPUT1, 0x800010 },
+	// We don´t actually need IN1R but nvm
+	{ CS47L63_ASP1TX2_INPUT1, 0x800011 },
 #endif
 
 #ifdef ENABLE_LINEIN
@@ -341,12 +349,12 @@ static const uint32_t cs47l63_cfg[][2] =
 	// this here is only there so we hear also that i2s data is sent 
 	
 	{ CS47L63_OUT1L_INPUT1,
-		(0x2B  << CS47L63_OUT1LMIX_VOL1_SHIFT) |        // quite weak
+		(0x40  << CS47L63_OUT1LMIX_VOL1_SHIFT) |        // 0x2b = -21dB, 0x40 = 0dB, 0x2e=-18dB, 0x28=-24dB
 		(0x020 << CS47L63_OUT1L_SRC1_SHIFT)             // ASP1_RX1 // from MCU (currently a sine wave only)
 	},
 
 	{ CS47L63_OUT1L_INPUT2,
-		(0x2B  << CS47L63_OUT1LMIX_VOL2_SHIFT) |        // quite weak
+		(0x40  << CS47L63_OUT1LMIX_VOL2_SHIFT) |        // 0x2b = -21dB, 0x40 = 0dB, 0x2e=-18dB, 0x28=-24dB
 		(0x021 << CS47L63_OUT1L_SRC2_SHIFT)             // ASP1_RX2
 	},
 
@@ -357,8 +365,7 @@ static const uint32_t cs47l63_cfg[][2] =
 	//},
 #endif	
 
-#undef ENABLE_LINEIN
-#ifdef ENABLE_LINEIN
+#ifdef ENABLE_LINEIN_PASSTHROUGH
 	// We need both channels here, even if we only have one output channel
 	// Iw we uncomment the next two {} we won´t get any line in pass-through, only i2s
 	{
@@ -373,7 +380,7 @@ static const uint32_t cs47l63_cfg[][2] =
 	},
 #endif
 
-#ifdef ENABLE_MIC
+#ifdef ENABLE_MIC_PASSTHROUGH
 	// We need both channels here, even if we only have one output channel
 	// Iw we uncomment the next two {} we won´t get any line in pass-through, only i2s
 	{
@@ -426,6 +433,8 @@ static int nrfadk_hwcodec_config(const uint32_t config[][2], uint32_t length)
 
 	return CS47L63_STATUS_OK;
 }
+
+// Just for testing and as reference!
 
 // Unused in minimum example
 // Used in i2s_echo
@@ -538,7 +547,7 @@ int main(void)
 
 	printk("\nOUT1L unmuted for 5000ms\n");
 
-	k_msleep(5000);
+	//k_msleep(5000);
 	i2s_polling_loop();
 
 #ifdef COMMENTS
