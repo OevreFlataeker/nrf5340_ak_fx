@@ -1,3 +1,8 @@
+Original code and source by ace.johnny (https://github.com/ace-johnny/nrfadk-hello_codec)
+Adapted for my purposes.
+
+---
+
 # nRF5340 Audio DK - Hello Codec
 
 This example is the bare minimum project needed to initialize, configure, and enable the CS47L63 hardware codec. It plays a sine wave using the I2S TX buffer, and then briefly mixes in the codec's noise and tone generators as well.
