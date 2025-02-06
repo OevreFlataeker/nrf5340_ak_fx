@@ -259,6 +259,16 @@ static int nrfadk_hwcodec_config(const uint32_t config[][2], uint32_t length)
 	return CS47L63_STATUS_OK;
 }
 
+// Buggy configuration - leaves ASP2 unconfigured in default GPIO mode
+const uint32_t GPIO_configuration[][2] = {
+	{ CS47L63_GPIO6_CTRL1, 0x61000001 }, // ASP2
+	{ CS47L63_GPIO7_CTRL1, 0x61000001 }, // ASP2
+	{ CS47L63_GPIO8_CTRL1, 0x61000001 }, // ASP2
+
+	/* Enable CODEC LED */
+	{ CS47L63_GPIO10_CTRL1, 0x41008001 },
+};
+
 /**
  * @brief       Initialize the CS47L63, start clocks, and configure subsystems.
  * 
