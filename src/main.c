@@ -67,7 +67,7 @@ static int nrfadk_hfclocks_init(void)
 // NRF_I2S
 
 #define MCKFREQ_6_144_MHZ 0x66666000
-#define I2S_BUFF_SIZE 8192 // Define an appropriate buffer size
+#define I2S_BUFF_SIZE 32768 // Define an appropriate buffer size
 
 static int16_t rx_buffer1[I2S_BUFF_SIZE] __attribute__((aligned(4)));
 static int16_t rx_buffer2[I2S_BUFF_SIZE] __attribute__((aligned(4)));
@@ -81,7 +81,7 @@ static void i2s_handler(nrfx_i2s_buffers_t const *p_released, uint32_t status)
 {
 // Select what effect we want: echo or dry signal
 #ifdef ECHO
-#define DELAY 2048
+#define DELAY 8192
 	static int16_t delay_buffer[DELAY];
 	static int delay_index = 0;
 #endif
