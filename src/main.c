@@ -27,12 +27,12 @@ LOG_MODULE_REGISTER(main, CONFIG_MAIN_LOG_LEVEL);
 // Claim the I2S0 peripheral
 static const nrfx_i2s_t i2s_instance = NRFX_I2S_INSTANCE(0);
 
-#undef ENABLE_LINEIN
+#define ENABLE_LINEIN
 #undef ENABLE_LINEIN_PASSTHROUGH
-#define ENABLE_MIC
+#undef ENABLE_MIC
 #undef ENABLE_MIC_PASSTHROUGH
 
-#define ECHO
+#undef ECHO
 
 /**
  * @brief       Initialize the high-frequency clocks and wait for each to start.
@@ -67,7 +67,7 @@ static int nrfadk_hfclocks_init(void)
 // NRF_I2S
 
 #define MCKFREQ_6_144_MHZ 0x66666000
-#define I2S_BUFF_SIZE 32768 // Define an appropriate buffer size
+#define I2S_BUFF_SIZE 4096 // Define an appropriate buffer size
 
 static int16_t rx_buffer1[I2S_BUFF_SIZE] __attribute__((aligned(4)));
 static int16_t rx_buffer2[I2S_BUFF_SIZE] __attribute__((aligned(4)));
@@ -91,19 +91,22 @@ static void i2s_handler(nrfx_i2s_buffers_t const *p_released, uint32_t status)
 		int16_t *tx_buffer = use_first_buffer ? &tx_buffer1[0] : &tx_buffer2[0];
 
 		size_t end = I2S_BUFF_SIZE / sizeof(uint32_t);
-		for (size_t i = 0; i < end; i++)
-		{
+		
 #ifdef ECHO
+for (size_t i = 0; i < end; i++)
+		{
 			int16_t delayed_sample = delay_buffer[delay_index];
 			tx_buffer[i] = rx_buffer[i] + delayed_sample * 0.5;
 			
 			delay_buffer[delay_index] = rx_buffer[i];
 			delay_index = (delay_index + 1) % DELAY;
+	}
+    
 #else
-			tx_buffer[i] = rx_buffer[i];		
+			//tx_buffer[i] = rx_buffer[i];
+		memcpy(tx_buffer, rx_buffer, end);		
 #endif
-		}
-        
+	    
 		// Toggle buffer pointer
 		use_first_buffer != use_first_buffer; 
 
@@ -236,6 +239,21 @@ static const uint32_t cs47l63_cfg[][2] =
 		{CS47L63_ASP1TX1_INPUT1, 0x800010},
 		// We don´t actually need IN1R but nvm
 		{CS47L63_ASP1TX2_INPUT1, 0x800011},
+#endif
+#ifdef ENABLE_LINEIN
+	// Enable line-in
+	{ CS47L63_INPUT2_CONTROL1, 0x00050020 },/* MODE=analog */ 
+	{ CS47L63_IN2L_CONTROL1, 0x10000000 },  /* SRC=IN2LP */
+	{ CS47L63_IN2R_CONTROL1, 0x10000000 },  /* SRC=IN2RP */
+	{ CS47L63_INPUT_CONTROL, 0x0000000C },  /* IN2_EN=1 */
+	// Set volume for line-in
+	{ CS47L63_IN2L_CONTROL2, 0x00800080 },  /* VOL=0dB, MUTE=0 */
+	{ CS47L63_IN2R_CONTROL2, 0x00800080 },  /* VOL=0dB, MUTE=0 */
+	{ CS47L63_INPUT_CONTROL3, 0x20000000 }, /* VU=1 */
+	// Important
+	/* Route IN2L and IN2R to I2S */
+	{ CS47L63_ASP1TX1_INPUT1, 0x800012 },
+	{ CS47L63_ASP1TX2_INPUT1, 0x800013 },
 #endif
 
 		// Output 1 left/right (reduced MIX_VOLs to prevent clipping summed signals)
