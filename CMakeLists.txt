@@ -6,6 +6,7 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(nrfadk-hello_codec)
 
 target_sources(app PRIVATE src/main.c)
+target_sources(app PRIVATE src/ring_buffer.c)
 
 zephyr_library_include_directories(src/drivers)
 add_subdirectory(src/drivers)

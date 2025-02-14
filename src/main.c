@@ -14,6 +14,21 @@
 #include <zephyr/drivers/i2s.h>
 #include <zephyr/logging/log.h>
 
+#define RINGBUFFER
+
+#ifdef RINGBUFFER
+#include "ring_buffer.h"
+#define I2S_BUFF_SIZE  8192  // I2S DMA buffer size
+
+static int32_t i2s_rx_buffer[I2S_BUFF_SIZE] __attribute__((aligned(4)));  // Double-buffered RX
+static int32_t i2s_tx_buffer[I2S_BUFF_SIZE] __attribute__((aligned(4)));  // Double-buffered TX
+
+static RingBuffer_t rx_ring_buffer;
+static RingBuffer_t tx_ring_buffer;
+
+static volatile bool i2s_transfer_complete = false;
+#endif
+
 #define CONFIG_MAIN_LOG_LEVEL LOG_LEVEL_DBG
 LOG_MODULE_REGISTER(main, CONFIG_MAIN_LOG_LEVEL);
 
@@ -67,7 +82,38 @@ static int nrfadk_hfclocks_init(void)
 // NRF_I2S
 
 #define MCKFREQ_6_144_MHZ 0x66666000
-#define I2S_BUFF_SIZE 4096 // Define an appropriate buffer size
+
+#ifdef RINGBUFFER
+void i2s_handler(nrfx_i2s_buffers_t const *p_released, uint32_t status) {
+    if (status & NRFX_I2S_STATUS_NEXT_BUFFERS_NEEDED) {
+        nrfx_i2s_buffers_t next_buffers = {
+            .p_rx_buffer = &i2s_rx_buffer[0],
+            .p_tx_buffer = &i2s_tx_buffer[0],
+			.buffer_size = I2S_BUFF_SIZE / sizeof(uint32_t),
+        };
+
+        // Fill TX buffer with processed data from ring buffer
+        for (uint32_t i = 0; i < I2S_BUFF_SIZE; i++) {
+            int32_t sample = 0;
+            if (!RingBuffer_Pop(&tx_ring_buffer, &sample)) {
+                sample = 0;  // If empty, output silence
+            }
+            i2s_tx_buffer[i] = sample;
+        }
+
+        nrfx_i2s_next_buffers_set(&i2s_instance, &next_buffers);
+    }
+
+    if (p_released->p_rx_buffer) {
+        // Store received samples in RX ring buffer
+        for (uint32_t i = 0; i < I2S_BUFF_SIZE; i++) {
+            if (!RingBuffer_Push(&rx_ring_buffer, p_released->p_rx_buffer[i])) {
+                // Buffer full, drop data
+            }
+        }
+    }
+}
+#else
 
 static int16_t rx_buffer1[I2S_BUFF_SIZE] __attribute__((aligned(4)));
 static int16_t rx_buffer2[I2S_BUFF_SIZE] __attribute__((aligned(4)));
@@ -76,6 +122,7 @@ static int16_t tx_buffer2[I2S_BUFF_SIZE] __attribute__((aligned(4)));
 
 static volatile bool i2s_transfer_done = false;
 static volatile bool use_first_buffer = true;
+
 
 static void i2s_handler(nrfx_i2s_buffers_t const *p_released, uint32_t status)
 {
@@ -124,16 +171,25 @@ for (size_t i = 0; i < end; i++)
         i2s_transfer_done = true;
     }
 }
+#endif
 
 nrfx_err_t i2s_start(void)
 {
-    nrfx_i2s_buffers_t initial_buffers = {
+#ifdef RINGBUFFER
+	nrfx_i2s_buffers_t initial_buffers = {
+		.p_rx_buffer = &i2s_rx_buffer[0],
+		.p_tx_buffer = &i2s_tx_buffer[0],
+		.buffer_size = I2S_BUFF_SIZE / sizeof(uint32_t),
+	};
+#else
+	nrfx_i2s_buffers_t initial_buffers = {
         .p_rx_buffer = (uint32_t *) &rx_buffer1[0],
         .p_tx_buffer = (uint32_t *) &tx_buffer1[0],
 		.buffer_size = I2S_BUFF_SIZE / sizeof(uint32_t),
     };
     
 	use_first_buffer = true;
+#endif
     return nrfx_i2s_start(&i2s_instance, &initial_buffers, 0);
 }	
 	
@@ -151,13 +207,18 @@ nrfx_err_t i2s_init(void)
         .sdin_pin = 15,  
         .mck_setup = MCKFREQ_6_144_MHZ,  // Adjust based on your setup
 		.enable_bypass = false,
-        .ratio = NRF_I2S_RATIO_128X, // 48 kHz
+        .ratio = NRF_I2S_RATIO_128X, //NRF_I2S_RATIO_128X, // 48 kHz
         .mode = NRF_I2S_MODE_MASTER,
         .format = NRF_I2S_FORMAT_I2S,
         .alignment = NRF_I2S_ALIGN_LEFT,
         .channels = NRF_I2S_CHANNELS_STEREO,
-        .sample_width = NRF_I2S_SWIDTH_16BIT
+        .sample_width = NRF_I2S_SWIDTH_16BIT,
     };
+
+#ifdef RINGBUFFER
+	RingBuffer_Init(&rx_ring_buffer);
+    RingBuffer_Init(&tx_ring_buffer);
+#endif
 
 	return nrfx_i2s_init(&i2s_instance, &config, i2s_handler);
 }
@@ -241,19 +302,19 @@ static const uint32_t cs47l63_cfg[][2] =
 		{CS47L63_ASP1TX2_INPUT1, 0x800011},
 #endif
 #ifdef ENABLE_LINEIN
-	// Enable line-in
-	{ CS47L63_INPUT2_CONTROL1, 0x00050020 },/* MODE=analog */ 
-	{ CS47L63_IN2L_CONTROL1, 0x10000000 },  /* SRC=IN2LP */
-	{ CS47L63_IN2R_CONTROL1, 0x10000000 },  /* SRC=IN2RP */
-	{ CS47L63_INPUT_CONTROL, 0x0000000C },  /* IN2_EN=1 */
-	// Set volume for line-in
-	{ CS47L63_IN2L_CONTROL2, 0x00800080 },  /* VOL=0dB, MUTE=0 */
-	{ CS47L63_IN2R_CONTROL2, 0x00800080 },  /* VOL=0dB, MUTE=0 */
-	{ CS47L63_INPUT_CONTROL3, 0x20000000 }, /* VU=1 */
-	// Important
-	/* Route IN2L and IN2R to I2S */
-	{ CS47L63_ASP1TX1_INPUT1, 0x800012 },
-	{ CS47L63_ASP1TX2_INPUT1, 0x800013 },
+		// Enable line-in
+		{ CS47L63_INPUT2_CONTROL1, 0x00050020 },/* MODE=analog */ 
+		{ CS47L63_IN2L_CONTROL1, 0x10000000 },  /* SRC=IN2LP */
+		{ CS47L63_IN2R_CONTROL1, 0x10000000 },  /* SRC=IN2RP */
+		{ CS47L63_INPUT_CONTROL, 0x0000000C },  /* IN2_EN=1 */
+		// Set volume for line-in
+		{ CS47L63_IN2L_CONTROL2, 0x00800080 },  /* VOL=0dB, MUTE=0 */
+		{ CS47L63_IN2R_CONTROL2, 0x00800080 },  /* VOL=0dB, MUTE=0 */
+		{ CS47L63_INPUT_CONTROL3, 0x20000000 }, /* VU=1 */
+		// Important
+		/* Route IN2L and IN2R to I2S */
+		{ CS47L63_ASP1TX1_INPUT1, 0x800012 },
+		{ CS47L63_ASP1TX2_INPUT1, 0x800013 },
 #endif
 
 		// Output 1 left/right (reduced MIX_VOLs to prevent clipping summed signals)
@@ -354,6 +415,23 @@ static int nrfadk_hwcodec_init(void)
 	return ret;
 }
 
+#ifdef RINGBUFFER
+void process_audio(void) {
+    int32_t sample;
+    while (!RingBuffer_IsEmpty(&rx_ring_buffer)) {
+        RingBuffer_Pop(&rx_ring_buffer, &sample);
+        
+        // Apply DSP processing (e.g., amplify by 1.5x)
+        // sample = (sample * 3) / 2;
+
+        // Store processed sample in TX ring buffer
+        if (!RingBuffer_Push(&tx_ring_buffer, sample)) {
+            // TX buffer full, drop sample
+        }
+    }
+}
+#endif
+
 ////////////////////////////////////////////////////////////////////////////////
 // MAIN
 
@@ -394,7 +472,11 @@ int main(void)
 	
 	while(true)
 	{
+#ifdef RINGBUFFER
+		process_audio();
+#else
 		k_yield();
+#endif
 	};
 
 	// We never return!
