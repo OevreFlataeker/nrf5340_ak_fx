@@ -11,8 +11,8 @@
 #include <nrfx_clock.h>
 #include <nrfx_i2s.h>
 #include "cs47l63_comm.h"
-#include <zephyr/drivers/i2s.h>
 #include <zephyr/logging/log.h>
+#include "sine.h"
 
 #define RINGBUFFER
 
@@ -42,12 +42,17 @@ LOG_MODULE_REGISTER(main, CONFIG_MAIN_LOG_LEVEL);
 // Claim the I2S0 peripheral
 static const nrfx_i2s_t i2s_instance = NRFX_I2S_INSTANCE(0);
 
-#define ENABLE_LINEIN
+#undef ENABLE_LINEIN
 #undef ENABLE_LINEIN_PASSTHROUGH
-#undef ENABLE_MIC
+#define ENABLE_MIC
 #undef ENABLE_MIC_PASSTHROUGH
 
-#undef ECHO
+#define ECHO
+#ifdef ECHO
+	#define DELAY 16384
+	int16_t delay_buffer[DELAY] = {};
+	uint32_t delay_index = 0;
+#endif
 
 /**
  * @brief       Initialize the high-frequency clocks and wait for each to start.
@@ -89,7 +94,7 @@ void i2s_handler(nrfx_i2s_buffers_t const *p_released, uint32_t status) {
         nrfx_i2s_buffers_t next_buffers = {
             .p_rx_buffer = &i2s_rx_buffer[0],
             .p_tx_buffer = &i2s_tx_buffer[0],
-			.buffer_size = I2S_BUFF_SIZE / sizeof(uint32_t),
+			.buffer_size = I2S_BUFF_SIZE, 
         };
 
         // Fill TX buffer with processed data from ring buffer
@@ -179,7 +184,7 @@ nrfx_err_t i2s_start(void)
 	nrfx_i2s_buffers_t initial_buffers = {
 		.p_rx_buffer = &i2s_rx_buffer[0],
 		.p_tx_buffer = &i2s_tx_buffer[0],
-		.buffer_size = I2S_BUFF_SIZE / sizeof(uint32_t),
+		.buffer_size = I2S_BUFF_SIZE, 
 	};
 #else
 	nrfx_i2s_buffers_t initial_buffers = {
@@ -236,8 +241,8 @@ static const uint32_t cs47l63_cfg[][2] =
 		{
 			CS47L63_ASP1_CONTROL2,						// 0x101000200 (matches above)
 			(0x10 << CS47L63_ASP1_RX_WIDTH_SHIFT) |		// 16bit (default is 0x18 = 24 bit)
-				(0x10 << CS47L63_ASP1_TX_WIDTH_SHIFT) | // 16bit (default is 0x18 = 24 bit)
-				(0b010 << CS47L63_ASP1_FMT_SHIFT)		// I2S (is default)
+			(0x10 << CS47L63_ASP1_TX_WIDTH_SHIFT) | // 16bit (default is 0x18 = 24 bit)
+			(0b010 << CS47L63_ASP1_FMT_SHIFT)		// I2S (is default)
 		},
 		{
 			CS47L63_ASP1_CONTROL3,
@@ -247,9 +252,9 @@ static const uint32_t cs47l63_cfg[][2] =
 		{
 			CS47L63_ASP1_ENABLES1,				   // 0x10001 (no match)
 			(1 << CS47L63_ASP1_RX2_EN_SHIFT) |	   // Disabled
-				(1 << CS47L63_ASP1_RX1_EN_SHIFT) | // Enabled
-				(1 << CS47L63_ASP1_TX2_EN_SHIFT) | // Disabled
-				(1 << CS47L63_ASP1_TX1_EN_SHIFT)   // Enabled
+			(1 << CS47L63_ASP1_RX1_EN_SHIFT) | // Enabled
+			(1 << CS47L63_ASP1_TX2_EN_SHIFT) | // Disabled
+			(1 << CS47L63_ASP1_TX1_EN_SHIFT)   // Enabled
 		},
 
 #ifdef ENABLE_MIC
@@ -282,13 +287,13 @@ static const uint32_t cs47l63_cfg[][2] =
 											//                                   = 0b101 = 3.072 MHz, controls IN1_PDMCLK freq
 
 		/* Un-mute and set gain to 0dB */
-		{CS47L63_IN1L_CONTROL2, 0x800080}, // p31 & p34, p181 0b1000 0000 0000 0000 1000 0000
+		{CS47L63_IN1L_CONTROL2, 0x800040}, // p31 & p34, p181 0b1000 0000 0000 0000 1000 0000
 										   // Bit 1-7 = 0x40 = 0dB Input Path 1L PGA Volume (analog only)
 										   // Bit 16-23 = 0x80 = default 0dB Input Path 1L Digial volume
 										   // Bit 28 = 0 (default 1), unmute
 
 		// We don´t actually need the settings for IN1R for PDM MIC
-		//{ CS47L63_IN1R_CONTROL2, 0x800080 },  // p31 & p34, p181 0b1000 0000 0000 0000 1000 0000
+		//{ CS47L63_IN1R_CONTROL2, 0x800040 },  // p31 & p34, p181 0b1000 0000 0000 0000 1000 0000
 		// Bit 1-7 = 0x40 = 0dB Input Path 1R PGA Volume (analog only)
 		// Bit 16-23 = 0x80 = default 0dB Input Path 1R Digial volume
 		// Bit 28 = 0 (default 1), unmute
@@ -418,20 +423,77 @@ static int nrfadk_hwcodec_init(void)
 #ifdef RINGBUFFER
 void process_audio(void) {
     int32_t sample;
+#ifdef CNT_SAMPLES_PROCESSED
+	uint32_t cnt = 0;
+#endif
     while (!RingBuffer_IsEmpty(&rx_ring_buffer)) {
         RingBuffer_Pop(&rx_ring_buffer, &sample);
         
         // Apply DSP processing (e.g., amplify by 1.5x)
         // sample = (sample * 3) / 2;
-
+#ifdef ECHO
+		int16_t delayed_sample = delay_buffer[delay_index];
+		delay_buffer[delay_index] = sample;
+		delay_index = (delay_index + 1) % DELAY;
+		sample += (delayed_sample * 0.5); 														
+#endif			
+		
+#ifdef CNT_SAMPLES_PROCESSED
+		cnt++;
+#endif
         // Store processed sample in TX ring buffer
         if (!RingBuffer_Push(&tx_ring_buffer, sample)) {
             // TX buffer full, drop sample
         }
     }
+#ifdef CNT_SAMPLES_PROCESSED
+	if (cnt>0) {
+		printk("%u", cnt);
+	}
+	else {
+		printk(".");
+	}
+#endif
 }
 #endif
 
+void print_settings() 
+{
+	printk("Samplerate:\n");
+	printk("i2s Buffer size: %u\n", I2S_BUFF_SIZE);
+	#ifdef ECHO
+		printk("Echo mode: on\n");
+		printk("Echo buffer size: %u\n", DELAY);
+	#else
+		printk("Echo mode: off\n");
+	#endif
+	#ifdef RINGBUFFER
+		printk("Ringbuffer: enabled\n");
+	#else
+		printk("Ringbuffer: disabled\n");
+	#endif
+	#ifdef ENABLE_MIC
+		printk("Digital microphone: enabled\n");
+	#ifdef ENABLE_MIC_PASSTHROUGH
+		printk("Digital microphone passthrough: enabled\n");
+	#else
+		printk("Digital microphone passthrough: disabled\n");
+	#endif 
+	#else
+		printk("Digital microphone: disabled\n");
+	#endif
+	#ifdef ENABLE_LINE
+		printk("LINE-IN: enabled\n");
+	#ifdef ENABLE_LINEIN_PASSTHROUGH
+		printk("LINE-IN passthrough: enabled\n");
+	#else
+		printk("LINE-IN passthrough: disabled\n");
+	#endif 
+	#else
+		printk("LINE-IN: disabled\n");
+	#endif
+		
+}
 ////////////////////////////////////////////////////////////////////////////////
 // MAIN
 
@@ -461,10 +523,14 @@ int main(void)
 		printk("\nError initializing Audio DK\n");
 		return -1;
 	}
+
+	// Setup 1 Hz sine at 48kHz
+	//createsine();
 		
 	printk("\nAudio DK initialized\n");
 	k_msleep(1250);
-	
+
+	print_settings();
 	// Unmute OUT1L playback
 	cs47l63_update_reg(&cs47l63_driver, CS47L63_OUT1L_VOLUME_1,
 					   CS47L63_OUT_VU_MASK | CS47L63_OUT1L_MUTE_MASK,
